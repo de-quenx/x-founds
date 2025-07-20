@@ -1,11 +1,11 @@
-name: simple file upload
+name: Simple file Upload
 
 on:
   workflow_dispatch:
     inputs:
       tag:
         required: true
-        default: 'packages-ipk'
+        default: 'v1.0.0'
       url:
         required: true
         default: 'https://github.com'
@@ -16,93 +16,160 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - run: |
-          sudo apt-get update && sudo apt-get install -y aria2 megatools wget
-          pip install gdown requests beautifulsoup4
+      - name: Download and Upload
+        run: |
+          # Install tools
+          sudo apt-get update >/dev/null 2>&1
+          sudo apt-get install -y megatools aria2 >/dev/null 2>&1
+          pip install gdown >/dev/null 2>&1
           
-          # MediaFire helper
-          cat > mf.py << 'EOF'
-          import sys, requests
-          from bs4 import BeautifulSoup
-          try:
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-            soup = BeautifulSoup(requests.get(sys.argv[1], headers=headers).content, 'html.parser')
-            link = soup.find('a', {'class': 'input popsok'})
-            if link and link.get('href'):
-              url = link['href']
-              print('https:' + url if url.startswith('//') else url)
-          except: pass
-          EOF
-          
-          tag="${{ github.event.inputs.tag }}"
           url="${{ github.event.inputs.url }}"
+          tag="${{ github.event.inputs.tag }}"
           
-          echo "Downloading from: $url"
+          echo "🔗 URL: $url"
+          echo "🏷️ Tag: $tag"
+          echo ""
+          echo "⬇️ Downloading..."
           
-          # Download based on platform
+          # Download with proper validation
           if [[ "$url" =~ github\.com ]]; then
+            # GitHub - reliable
             filename=$(basename "$url" | cut -d'?' -f1)
-            curl -L -o "$filename" "$url"
+            echo "📁 GitHub file: $filename"
+            if curl -fsSL -o "$filename" "$url"; then
+              echo "✅ GitHub download OK"
+            else
+              echo "❌ GitHub download failed"
+              exit 1
+            fi
             
           elif [[ "$url" =~ drive\.google\.com ]]; then
-            filename="gdrive-file"
-            id=$(echo "$url" | grep -oP '(?<=/d/)[^/]+|(?<=id=)[^&]+' | head -1)
+            # Google Drive - fix size issue
+            echo "📁 Google Drive detected"
+            id=$(echo "$url" | sed -n 's/.*\/d\/\([^\/]*\).*/\1/p')
+            [[ -z "$id" ]] && id=$(echo "$url" | sed -n 's/.*id=\([^&]*\).*/\1/p')
+            
             if [[ -n "$id" ]]; then
-              gdown "https://drive.google.com/uc?id=$id" -O "$filename" --fuzzy 2>/dev/null || \
-              gdown "https://drive.google.com/uc?id=$id" -O "$filename" 2>/dev/null
+              echo "🆔 File ID: $id"
+              
+              # Method 1: gdown with validation
+              if gdown "$id" -O "temp_file" --quiet 2>/dev/null; then
+                # Check if it's actually a file (not HTML error)
+                if file "temp_file" | grep -q "HTML\|text" && [[ $(stat -c%s "temp_file") -lt 10000 ]]; then
+                  echo "⚠️ Got HTML response, trying alternative..."
+                  rm -f "temp_file"
+                  
+                  # Method 2: Direct download with confirm bypass
+                  echo "🔄 Trying direct method..."
+                  if aria2c -q -o "temp_file2" "https://drive.google.com/uc?export=download&id=$id&confirm=t" 2>/dev/null; then
+                    filename="temp_file2"
+                    echo "✅ Direct method OK"
+                  else
+                    echo "❌ Google Drive download failed"
+                    exit 1
+                  fi
+                else
+                  filename="temp_file"
+                  echo "✅ gdown method OK"
+                fi
+              else
+                echo "❌ gdown failed"
+                exit 1
+              fi
+              
+              # Rename to proper name
+              final_name="gdrive-$(echo $id | cut -c1-8)"
+              mv "$filename" "$final_name"
+              filename="$final_name"
+            else
+              echo "❌ Cannot extract Google Drive ID"
+              exit 1
             fi
             
           elif [[ "$url" =~ mega\.nz ]]; then
-            filename="mega-file"
-            megadl "$url" --path=. 2>/dev/null
-            downloaded=$(find . -maxdepth 1 -type f -newer mf.py 2>/dev/null | head -1)
-            if [[ -f "$downloaded" ]]; then
-              # Get original filename or use default
-              original=$(basename "$downloaded")
-              if [[ "$original" != "mf.py" ]]; then
-                filename="$original"
+            # MEGA
+            echo "📁 MEGA detected"
+            if megadl "$url" --path=. >/dev/null 2>&1; then
+              filename=$(find . -maxdepth 1 -type f -newer /tmp -not -name "*.py" -not -name "*.yml" 2>/dev/null | head -1)
+              if [[ -f "$filename" ]]; then
+                filename=$(basename "$filename")
+                echo "✅ MEGA download OK: $filename"
+              else
+                echo "❌ MEGA download failed"
+                exit 1
               fi
-              [[ "$downloaded" != "./$filename" ]] && mv "$downloaded" "$filename"
-            fi
-            
-          elif [[ "$url" =~ mediafire\.com ]]; then
-            filename="mediafire-file"
-            direct=$(python3 mf.py "$url" 2>/dev/null)
-            if [[ -n "$direct" ]]; then
-              curl -L -o "$filename" "$direct" 2>/dev/null || \
-              wget -O "$filename" "$direct" 2>/dev/null
+            else
+              echo "❌ MEGA download failed"
+              exit 1
             fi
             
           else
+            # Direct URL
+            echo "📁 Direct URL detected"
             filename=$(basename "$url" | cut -d'?' -f1)
             [[ -z "$filename" || "$filename" == "/" ]] && filename="direct-file"
-            curl -L -o "$filename" "$url" 2>/dev/null || \
-            wget -O "$filename" "$url" 2>/dev/null
+            
+            # Try multiple methods
+            if aria2c -q -o "$filename" "$url" 2>/dev/null; then
+              echo "✅ aria2c download OK"
+            elif curl -fsSL -o "$filename" "$url"; then
+              echo "✅ curl download OK"
+            elif wget -q -O "$filename" "$url"; then
+              echo "✅ wget download OK"
+            else
+              echo "❌ Direct download failed"
+              exit 1
+            fi
           fi
           
-          # Check download result
+          # Validate download
           if [[ -f "$filename" ]]; then
-            size=$(stat -c%s "$filename" 2>/dev/null || echo "0")
-            if [[ "$size" -gt 0 ]]; then
-              echo "✅ Downloaded: $filename ($size bytes)"
-              
-              # Upload to release
-              if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-                echo "Adding to existing release: $tag"
-                gh release upload "$tag" "$filename" --repo "${{ github.repository }}" --clobber
-              else
-                echo "Creating new release: $tag"
-                gh release create "$tag" "$filename" --repo "${{ github.repository }}"
+            size=$(stat -c%s "$filename")
+            
+            # Check if file is valid
+            if [[ "$size" -eq 0 ]]; then
+              echo "❌ File is empty (0 bytes)"
+              exit 1
+            elif [[ "$size" -lt 100 ]]; then
+              echo "⚠️ File very small ($size bytes), checking content..."
+              if file "$filename" | grep -q "HTML\|text"; then
+                echo "❌ File contains HTML/text (likely error page)"
+                echo "Content preview:"
+                head -3 "$filename"
+                exit 1
               fi
-              
-              echo "✅ Upload completed!"
+            fi
+            
+            echo "✅ File valid: $filename ($size bytes)"
+          else
+            echo "❌ No file downloaded"
+            exit 1
+          fi
+          
+          # Upload to release
+          echo ""
+          echo "⬆️ Uploading to release..."
+          
+          if gh release view "$tag" >/dev/null 2>&1; then
+            if gh release upload "$tag" "$filename" --clobber; then
+              echo "✅ Added to existing release: $tag"
             else
-              echo "❌ Downloaded file is empty"
+              echo "❌ Upload to existing release failed"
               exit 1
             fi
           else
-            echo "❌ Download failed"
-            exit 1
+            if gh release create "$tag" "$filename"; then
+              echo "✅ Created new release: $tag"
+            else
+              echo "❌ Create new release failed"
+              exit 1
+            fi
           fi
+          
+          echo ""
+          echo "🎉 Success!"
+          echo "   File: $filename"
+          echo "   Size: $size bytes"
+          echo "   Tag: $tag"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
