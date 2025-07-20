@@ -1,4 +1,4 @@
-name: Rename v1
+name: rename target
 
 on:
   workflow_dispatch:
