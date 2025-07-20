@@ -1,0 +1,70 @@
+name: Manual folder sync from source repo to target repo
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: 'Repo sumber (format: user/repo)'
+        required: true
+        default: 'userA/source-repo'
+      source_branch:
+        description: 'Branch target di repo sumber'
+        required: true
+        default: 'main'
+      old_folder:
+        description: 'Folder di repo sumber yang akan disalin'
+        required: true
+        default: 'drivers/net/wireless/realtek/rtl8189fs'
+      new_folder:
+        description: 'Folder tujuan di repo target'
+        required: true
+        default: 'drivers/net/wireless/realtek/rtl8189fs'
+      target_repo:
+        description: 'Repo target (format: user/repo)'
+        required: true
+        default: 'userB/target-repo'
+      target_branch:
+        description: 'Branch target di repo target'
+        required: true
+        default: 'main'
+
+jobs:
+  sync-folder:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source repo
+        env:
+          SOURCE_REPO_PAT: ${{ secrets.SOURCE_REPO_PAT }}
+        run: |
+          git clone --depth 1 --branch ${{ github.event.inputs.source_branch }} https://x-access-token:${SOURCE_REPO_PAT}@github.com/${{ github.event.inputs.source_repo }} source-repo
+
+      - name: Setup git in runner
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Clone target repo
+        env:
+          TARGET_REPO_PAT: ${{ secrets.TARGET_REPO_PAT }}
+        run: |
+          git clone https://x-access-token:${TARGET_REPO_PAT}@github.com/${{ github.event.inputs.target_repo }} target-repo
+          cd target-repo
+          git checkout ${{ github.event.inputs.target_branch }} || git checkout -b ${{ github.event.inputs.target_branch }}
+          cd ..
+
+      - name: Copy folder from source repo to target repo
+        run: |
+          mkdir -p target-repo/${{ github.event.inputs.new_folder }}
+          rsync -av --delete source-repo/${{ github.event.inputs.old_folder }}/ target-repo/${{ github.event.inputs.new_folder }}/
+
+      - name: Commit and push changes
+        working-directory: target-repo
+        run: |
+          git add ${{ github.event.inputs.new_folder }}
+          if ! git diff --cached --quiet; then
+            git commit -m "Sync folder ${{ github.event.inputs.old_folder }} from ${{ github.event.inputs.source_repo }} to ${{ github.event.inputs.new_folder }}"
+            git push origin ${{ github.event.inputs.target_branch }}
+          else
+            echo "No changes to commit"
+          fi

@@ -1,0 +1,108 @@
+name: simple file upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        required: true
+        default: 'packages-ipk'
+      url:
+        required: true
+        default: 'https://github.com'
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - run: |
+          sudo apt-get update && sudo apt-get install -y aria2 megatools wget
+          pip install gdown requests beautifulsoup4
+          
+          # MediaFire helper
+          cat > mf.py << 'EOF'
+          import sys, requests
+          from bs4 import BeautifulSoup
+          try:
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            soup = BeautifulSoup(requests.get(sys.argv[1], headers=headers).content, 'html.parser')
+            link = soup.find('a', {'class': 'input popsok'})
+            if link and link.get('href'):
+              url = link['href']
+              print('https:' + url if url.startswith('//') else url)
+          except: pass
+          EOF
+          
+          tag="${{ github.event.inputs.tag }}"
+          url="${{ github.event.inputs.url }}"
+          
+          echo "Downloading from: $url"
+          
+          # Download based on platform
+          if [[ "$url" =~ github\.com ]]; then
+            filename=$(basename "$url" | cut -d'?' -f1)
+            curl -L -o "$filename" "$url"
+            
+          elif [[ "$url" =~ drive\.google\.com ]]; then
+            filename="gdrive-file"
+            id=$(echo "$url" | grep -oP '(?<=/d/)[^/]+|(?<=id=)[^&]+' | head -1)
+            if [[ -n "$id" ]]; then
+              gdown "https://drive.google.com/uc?id=$id" -O "$filename" --fuzzy 2>/dev/null || \
+              gdown "https://drive.google.com/uc?id=$id" -O "$filename" 2>/dev/null
+            fi
+            
+          elif [[ "$url" =~ mega\.nz ]]; then
+            filename="mega-file"
+            megadl "$url" --path=. 2>/dev/null
+            downloaded=$(find . -maxdepth 1 -type f -newer mf.py 2>/dev/null | head -1)
+            if [[ -f "$downloaded" ]]; then
+              # Get original filename or use default
+              original=$(basename "$downloaded")
+              if [[ "$original" != "mf.py" ]]; then
+                filename="$original"
+              fi
+              [[ "$downloaded" != "./$filename" ]] && mv "$downloaded" "$filename"
+            fi
+            
+          elif [[ "$url" =~ mediafire\.com ]]; then
+            filename="mediafire-file"
+            direct=$(python3 mf.py "$url" 2>/dev/null)
+            if [[ -n "$direct" ]]; then
+              curl -L -o "$filename" "$direct" 2>/dev/null || \
+              wget -O "$filename" "$direct" 2>/dev/null
+            fi
+            
+          else
+            filename=$(basename "$url" | cut -d'?' -f1)
+            [[ -z "$filename" || "$filename" == "/" ]] && filename="direct-file"
+            curl -L -o "$filename" "$url" 2>/dev/null || \
+            wget -O "$filename" "$url" 2>/dev/null
+          fi
+          
+          # Check download result
+          if [[ -f "$filename" ]]; then
+            size=$(stat -c%s "$filename" 2>/dev/null || echo "0")
+            if [[ "$size" -gt 0 ]]; then
+              echo "✅ Downloaded: $filename ($size bytes)"
+              
+              # Upload to release
+              if gh release view "$tag" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+                echo "Adding to existing release: $tag"
+                gh release upload "$tag" "$filename" --repo "${{ github.repository }}" --clobber
+              else
+                echo "Creating new release: $tag"
+                gh release create "$tag" "$filename" --repo "${{ github.repository }}"
+              fi
+              
+              echo "✅ Upload completed!"
+            else
+              echo "❌ Downloaded file is empty"
+              exit 1
+            fi
+          else
+            echo "❌ Download failed"
+            exit 1
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
