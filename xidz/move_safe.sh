@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Dont Edit And Remove
-SOURCE="/root/30-keep_alive-modemmanager"
+SOURCE="/root/keep-modemmanager"
 DEST="/etc/hotplug.d/iface/30-keep_alive-modemmanager"
-TEMP="/tmp/30-keep_alive-modemmanager.tmp"
+TEMP="/tmp/keep-modemmanager.tmp"
 
 # Process with different permission options
 cp "$SOURCE" "$TEMP" && \
