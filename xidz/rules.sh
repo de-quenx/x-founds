@@ -1,7 +1,7 @@
 #!/bin/sh
 
 FILE_TARGET="/lib/udev/rules.d/77-mm-cinterion-port-types.rules"
-FILE_INSERT="/root/modem"
+FILE_INSERT="/root/rules"
 TMP_FILE="/tmp/new.rules"
 INSERT_LINE=70
 
