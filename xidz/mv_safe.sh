@@ -10,7 +10,6 @@ cp "$SOURCE" "$TEMP" && \
 mv "$TEMP" "$DEST" && \
 chmod 755 "$DEST" && \
 rm "$SOURCE" && \
-rm "$TEMP" && \
 
 # Remove Script
 rm -- "$0"
