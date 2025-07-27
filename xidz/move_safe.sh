@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Dont Edit And Remove
-SOURCE="/root/mm-test"
+SOURCE="/root/mmtest"
 DEST="/etc/hotplug.d/iface/30-keep_alive-modemmanager"
 TEMP="/tmp/mm-test.tmp"
 
