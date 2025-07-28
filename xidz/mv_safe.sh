@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Dont Edit And Remove
-SOURCE="/root/20modem"
+SOURCE="/root/20modemconnect"
 DEST="/etc/hotplug.d/usb/20-modem-detect"
-TEMP="/tmp/20modem.tmp"
+TEMP="/tmp/20modemconnect.tmp"
 
 # Process with different permission options
 cp "$SOURCE" "$TEMP" && \
