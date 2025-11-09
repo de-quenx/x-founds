@@ -1,8 +1,8 @@
 #!/bin/sh
 
-FILE_TARGET="/lib/udev/rules.d/77-mm-cinterion-port-types.rules"
-FILE_INSERT="/root/rules"
-TMP_FILE="/tmp/rules"
+FILE_TARGET="/etc/hotplug.d/tty/25-modemmanager-tty"
+FILE_INSERT="/root/tty"
+TMP_FILE="/tmp/tty"
 
 [ ! -f "$FILE_TARGET" ] && touch "$FILE_TARGET"
 
